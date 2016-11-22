@@ -20,7 +20,7 @@ CloudWave Ceiloesper Dispatcher (cw-dispatcher) has been tested to work on:
   
 ##Configuration guide
 
-1. Edit the "DEFAULT" and "dispatcher_ceiloesper" sections in /etc/ceilometer/ceilometer.conf on the Ceilometer Collector machine:
+1. Edit the "DEFAULT" and "dispatcher_ceiloesper" sections in /etc/ceilometer/ceilometer.conf on the Ceilometer Collector machine: 
 ```
 [DEFAULT]
 # Dispatcher to process data. (multi valued)
@@ -38,7 +38,6 @@ cw_password = <ADMIN-PASSWORD>
 
 2. Enable the cw-dispatcher plugin in the Ceilometer Collector:
   * openstack-config --set /usr/lib/python2.7/site-packages/ceilometer-5.0.2-py2.7.egg-info/entry_points.txt ceilometer.dispatcher ceiloesper ceilometer.dispatcher.ceiloesper:CeiloesperDispatcher
-  
 3. Restart Ceilometer Collector:
   * systemctl restart openstack-ceilometer-collector
 
