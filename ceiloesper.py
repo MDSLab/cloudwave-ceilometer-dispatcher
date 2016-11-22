@@ -1,7 +1,3 @@
-# Copyright 2014 University of Messina (UniMe)
-#
-# Author: Nicola Peditto <npeditto@unime.it>
-#
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
 # a copy of the License at
@@ -14,25 +10,36 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+#
+# Author: Nicola Peditto <npeditto@unime.it> - University of Messina (UniMe) - 2014 2015 2016
+#
+
 
 import os
 import json
 import httplib2
 import logging
 import logging.handlers
-from oslo.config import cfg
-from ceilometer import dispatcher
-from ceilometer.openstack.common import log
-
 import time
 import calendar
-from datetime import *
 
 import keystoneclient.v2_0.client as ksclient
 import heatclient.client as heatc
 
+#from oslo.utils import timeutils
+from oslo_log import log
+from oslo_config import cfg
+from datetime import *
+from ceilometer import dispatcher
 
-from oslo.utils import timeutils
+
+
+
+
+
+
+
+
 
 
 #Get configuration parameters from /etc/ceilometer/ceilometer.conf
@@ -62,6 +69,14 @@ cfg.CONF.register_opts(ceiloesper_dispatcher_opts, group="dispatcher_ceiloesper"
 LOG = log.getLogger(__name__)
 
 
+ENV_HEAT_OS_API_VERSION = "1"
+ENV_OS_AUTH_URL = cfg.CONF.dispatcher_ceiloesper.cw_auth_url
+ENV_OS_USERNAME = cfg.CONF.dispatcher_ceiloesper.cw_username
+ENV_OS_TENANT_NAME = cfg.CONF.dispatcher_ceiloesper.cw_tenant_name
+ENV_OS_PASSWORD = cfg.CONF.dispatcher_ceiloesper.cw_password
+
+
+
 #CloudWave dispatcher for Ceiloesper communication
 class CeiloesperDispatcher(dispatcher.Base):
     '''Dispatcher class for recording metering data to Ceiloesper CEP engine.
@@ -84,13 +99,13 @@ class CeiloesperDispatcher(dispatcher.Base):
     def __init__(self, conf):
         
         LOG.info('CW -> CEILOESPER DISPATCHER')
-        
+        """
         ENV_HEAT_OS_API_VERSION = "1"
 	ENV_OS_AUTH_URL = cfg.CONF.dispatcher_ceiloesper.cw_auth_url
         ENV_OS_USERNAME = cfg.CONF.dispatcher_ceiloesper.cw_username
         ENV_OS_TENANT_NAME = cfg.CONF.dispatcher_ceiloesper.cw_tenant_name
         ENV_OS_PASSWORD = cfg.CONF.dispatcher_ceiloesper.cw_password
-      
+      	"""
 	LOG.info('CW -> CEILOESPER DISPATCHER\nKeystone credentials:\n\tAUTH_URL: %s\n\tUSERNAME: %s\n\tTENANT_NAME: %s\n\tPASSWORD: %s',ENV_OS_AUTH_URL, ENV_OS_USERNAME, ENV_OS_TENANT_NAME, ENV_OS_PASSWORD)
       
         super(CeiloesperDispatcher, self).__init__(conf)
@@ -102,31 +117,38 @@ class CeiloesperDispatcher(dispatcher.Base):
                 auth_url=ENV_OS_AUTH_URL,
                 username=ENV_OS_USERNAME,
                 password=ENV_OS_PASSWORD,
-                tenant_name=ENV_OS_TENANT_NAME
+                tenant_name= ENV_OS_TENANT_NAME
         )
 
         
         for y in keystone.services.list():
                 if y.name == 'heat':
-                    heat_service_id = y.id
+                    	heat_service_id = y.id
+			LOG.info('HEAT heat_service_id: %s', heat_service_id)
     
         for z in keystone.endpoints.list():
                 if z.service_id == heat_service_id:
-                    heat_endpoint = z.internalurl
-    
+                    	heat_endpoint = z.internalurl
+    			LOG.info('HEAT heat_endpoint PRE: %s', heat_endpoint)
         # % changes to $ in different openstack versions
-        heat_endpoint = heat_endpoint.replace('%(tenant_id)s', keystone.project_id)
-        heat_endpoint = heat_endpoint.replace('$(tenant_id)s', keystone.project_id)
-    
+        
+	self.init_endpoint = heat_endpoint 
+	heat_endpoint = heat_endpoint.replace('%(tenant_id)s', keystone.project_id)
+        #heat_endpoint = heat_endpoint.replace('$(tenant_id)s', keystone.project_id)
+
+	LOG.info('HEAT heat_endpoint POST: %s', heat_endpoint)
+
         self.heat = heatc.Client(
                 ENV_HEAT_OS_API_VERSION,
-                endpoint= heat_endpoint,
-                token=keystone.auth_token
+                endpoint = heat_endpoint,
+                token = keystone.auth_token
         )
         self.instances = {}
     
         #INIT instances' cache
         self.makeCache()
+
+
         m_inst=json.dumps(self.instances, sort_keys=True, indent=4, separators=(',', ': '))
         LOG.info('\nCW -> Resource IDs Heat list [ResourceID : StackID] UPDATED: \n%s', str(m_inst))
     
@@ -136,11 +158,42 @@ class CeiloesperDispatcher(dispatcher.Base):
 
     def makeCache(self):
         ''' Make instances' cache '''
-        for stack in self.heat.stacks.list():
+	"""
+        for stack in self.heat.stacks.list(global_tenant=True):
                 for res in self.heat.resources.list(stack.id):
-			#LOG.info('RESOURCES in HEAT: %s', res)
+			LOG.info('RESOURCES in HEAT: %s', res)
 			if res.resource_type == "OS::Nova::Server":
                         	self.instances[res.physical_resource_id] = stack.id
+	"""
+
+        for stack in self.heat.stacks.list(global_tenant=True):
+                #fstack=json.dumps(stack, sort_keys=True, indent=4, separators=(',', ': '))
+                LOG.info('\n\n\nStack: %s - Project: %s\n\n', stack.stack_name, stack.project)
+                temp_endpoint = self.init_endpoint.replace('%(tenant_id)s', stack.project )
+                #heat_endpoint = heat_endpoint.replace('$(tenant_id)s', stack.project )
+                LOG.info('HEAT heat_endpoint TEMP: %s', temp_endpoint)
+
+                keystone_temp = ksclient.Client(
+                        auth_url=ENV_OS_AUTH_URL,
+                        username=ENV_OS_USERNAME,
+                        password=ENV_OS_PASSWORD,
+                        tenant_id=stack.project
+                )
+
+
+                heat_temp = heatc.Client(
+                        ENV_HEAT_OS_API_VERSION,
+                        endpoint = temp_endpoint,
+                        token = keystone_temp.auth_token
+                )
+                for res in heat_temp.resources.list(stack.id):
+                        LOG.info('RESOURCES in HEAT: %s', res)
+                        if res.resource_type == "OS::Nova::Server":
+                                self.instances[res.physical_resource_id] = stack.id
+
+
+
+
 
     def checkCache(self, inst_uuid):    
         ''' 
@@ -184,7 +237,7 @@ class CeiloesperDispatcher(dispatcher.Base):
         http = httplib2.Http()
         response, send=http.request(url,"POST",body=data)
         result=json.dumps(response, sort_keys=True, indent=4, separators=(',', ': '))
-        #LOG.info("CW -> CEIOESPER RESPONSE: %s", send)
+        #LOG.debug("CW -> CEIOESPER RESPONSE: %s", send)
         #LOG.info("\nCW -> CEIOESPER RESULT: \n%s", result)
         #meterdata=json.dumps(data, sort_keys=True, indent=4, separators=(',', ': '))
 
@@ -199,62 +252,116 @@ class CeiloesperDispatcher(dispatcher.Base):
         #If there are more samples in a messagge
         for meter in data:    
         
-
+	    #TO SEE ALL METRICS ARE COMING TO COLLECTOR
+	    result=json.dumps(meter, sort_keys=True, indent=4, separators=(',', ': '))
+	    #LOG.info("CW -> GLOBAL METRIC: %s", result)
 
 	    if meter['user_id'] == None:
 
-		#COMPUTE MONITOR METERS
+		#COMPUTE MONITOR AND HARDWARE METERS
 
 		#LOG.info('CW -> COMPUTE MONITOR METRIC %s from %s: not forwarded!!!', meter['counter_name'], meter['resource_id'])
+                LOG.info("CW -> CENTRAL-COMPUTE METER: %s", result)
 
-                result=json.dumps(meter, sort_keys=True, indent=4, separators=(',', ': '))
-                LOG.info("CW -> COMPUTE METER: %s", result)
+		# FOR SNMP HARDWARE METRICS OF EACH COMPUTE NODE
+		if meter['source'] == "hardware":
 
+                	#LOG.info("CW -> HARDWARE METRIC: %s", result)
+			LOG.info("CW -> HARDWARE METRIC: HOST %s - %s - %s %s", meter['resource_id'], meter['counter_name'], str(meter['counter_volume']), meter['counter_unit'])
+            		#result=json.dumps(meter, sort_keys=True, indent=4, separators=(',', ': '))
+            		#LOG.info("CW -> FULL HARDWARE METRIC: %s", result)
 
-		if meter['counter_name'] == "vlan.bandwidth":
-			meter_name=meter['counter_name']
-			meter_volume=str(meter['counter_volume'])
-			meter_unit=meter['counter_unit']
-			user_data="ceilometer"
-                	meter_timestamp=calendar.timegm(datetime.strptime(meter['timestamp'], '%Y-%m-%d %H:%M:%S.%f').timetuple())
-                	#LOG.info("CW -> MONITOR MSG TIMESTAMP: %s", meter_timestamp)
-			meter_resource_id=meter['resource_id']
+			meter_name = meter['counter_name']
+			meter_compute = meter['resource_id']
+			meter_volume = str(meter['counter_volume'])
+                        meter_unit=meter['counter_unit']
+			meter_hw_metadata = "hardware"
+			meter_timestamp = calendar.timegm(datetime.strptime(meter['timestamp'], '%Y-%m-%dT%H:%M:%S.%f').timetuple()) # Y3
+                        esper_data='{"applicationId":"None","probe_inst":"None","name":"'+meter_name+'","volume":"'+meter_volume+'","metadata":"'+meter_hw_metadata+'","unit":"'+meter_unit+'","timestamp":"'+str(meter_timestamp)+'","source":"'+meter_compute+'", "vlan_ip":"None", "host_id":"None"}'
 
-			meter_stackid=meter['resource_metadata'].get('stack_id')   #stackID inserted by cloudwave
+                        self.sendMeasure(esper_data)
+		
+		# FOR THE METRICS COLLECTED BY MONITOR PLUGINS AND CENTRAL POLLSTERS (BOTH CREATED BY CEILOMETER CENTRAL AGENT)
+		elif meter['source'] == "openstack":
 
-                	esper_data='{"applicationId":"'+meter_stackid+'","probe_inst":"None","name":"'+meter_name+'","volume":"'+meter_volume+'","metadata":"'+str(user_data)+'","unit":"'+meter_unit+'","timestamp":"'+str(meter_timestamp)+'","source":"APPLICATION", "vlan_ip":"'+meter_resource_id+'", "host_id":"None"}'
+			LOG.info("CW -> COMPUTE METRIC: %s - %s - %s %s", meter['resource_id'], meter['counter_name'], str(meter['counter_volume']), meter['counter_unit'])
+			
+			# TO FORWARD TO CEILOESPER ONLY "vlan.bandwidth" METRICS
+			if meter['counter_name'] == "vlan.bandwidth":
+				result=json.dumps(meter, sort_keys=True, indent=4, separators=(',', ': '))
+                                LOG.debug("CW -> VLAN bandwidth: %s", result)
 
-                	self.sendMeasure(esper_data)
+			if meter['counter_name'] == "host.avg_packetloss":
 
+				result=json.dumps(meter, sort_keys=True, indent=4, separators=(',', ': '))
+                        	LOG.info("CW -> VLAN METRIC: %s", result)				
+
+				meter_name=meter['counter_name']
+				meter_volume=str(meter['counter_volume'])
+				meter_unit=meter['counter_unit']
+				user_data="ceilometer"
+                		#meter_timestamp=calendar.timegm(datetime.strptime(meter['timestamp'], '%Y-%m-%d %H:%M:%S.%f').timetuple()) # Y2
+				meter_timestamp=calendar.timegm(datetime.strptime(meter['timestamp'], '%Y-%m-%dT%H:%M:%S.%f').timetuple()) # Y3
+				#LOG.debug("CW -> MONITOR MSG TIMESTAMP: %s", meter_timestamp)
+				meter_resource_id=meter['resource_id']
+				meter_payload=meter['resource_metadata'].get('payload')
+				meter_stackid=meter_payload.get('stack_id')   #stackID inserted by cloudwave
+
+                		esper_data='{"applicationId":"'+meter_stackid+'","probe_inst":"None","name":"'+meter_name+'","volume":"'+meter_volume+'","metadata":"'+str(user_data)+'","unit":"'+meter_unit+'","timestamp":"'+str(meter_timestamp)+'","source":"APPLICATION", "vlan_ip":"'+meter_resource_id+'", "host_id":"None"}'
+
+                		self.sendMeasure(esper_data)
+
+			if meter['counter_name'] == "hardware.network.outgoing.bytes.rate":
+                                result=json.dumps(meter, sort_keys=True, indent=4, separators=(',', ': '))
+                                LOG.info("CW -> OUTGOING B/s METRIC: %s", result)
+
+	                        meter_name = "cw-bandwidth"
+        	                meter_compute = meter['resource_id']
+                	        meter_volume = str(meter['counter_volume'])
+				meter_bandwidth = meter['counter_volume']*8/1000000;
+                	        meter_unit=meter['counter_unit']
+                       		meter_hw_metadata = "hardware"
+	                        meter_timestamp = calendar.timegm(datetime.strptime(meter['timestamp'], '%Y-%m-%dT%H:%M:%S.%f').timetuple()) # Y3
+				
+				#meter_CM_stackid="5ce549cd-5fe2-49ec-9e06-71f18e89e6d9" #Y3 demo hardcoding
+        	                #esper_data='{"applicationId":"'+meter_CM_stackid+'","probe_inst":"None","name":"'+meter_name+'","volume":"'+meter_volume+'","metadata":"'+meter_hw_metadata+'","unit":"'+meter_unit+'","timestamp":"'+str(meter_timestamp)+'","source":"'+meter_compute+'", "vlan_ip":"None", "host_id":"None"}'
+
+				esper_data='{"applicationId":"None","probe_inst":"None","name":"'+meter_name+'","volume":"'+meter_volume+'","metadata":"'+meter_hw_metadata+'","unit":"'+meter_unit+'","timestamp":"'+str(meter_timestamp)+'","source":"'+meter_compute+'", "vlan_ip":"None", "host_id":"None"}'
+
+				LOG.info("CW -> CW-BANDWIDTH for %s: %s Mbps", meter_compute, str(meter_bandwidth) )
+                                self.sendMeasure(esper_data)
+
+		else:
+			LOG.info("CW -> COMPUTE METRIC USELESS")			
 
 
 	    else:
 	      
-	      	#INSTANCES METERS
+	      	#INSTANCES METRICS (Openstack and CloudWave)
 
-		#result=json.dumps(meter, sort_keys=True, indent=4, separators=(',', ': '))
-		#LOG.info("CW -> METER: %s", result)
+		#LOG.info("CW -> INSTANCE METRIC: %s", meter)
 
 		meter_inst_uuid=meter['resource_id']
-
 		meter_stackid=meter['resource_metadata'].get('stack_id')   #stackID inserted by cloudwave
 		meter_hostid=meter['resource_metadata'].get('host')
-		
 		meter_inst_name=meter['resource_metadata'].get('display_name')
 		meter_name=meter['counter_name']
 
-		#LOG.info("CW -> METER %s FROM %s", meter_name, meter_inst_uuid)# meter_inst_name)
+		LOG.info("CW ---> INSTANCE METRIC %s FROM %s", meter_name, meter_inst_uuid)# meter_inst_name)
 
 		meter_volume=str(meter['counter_volume'])
 		meter_unit=meter['counter_unit']
 
+		#TIMESTAMP CONVERSION TO MILLISECONDS
 		meter_timestamp=meter['timestamp']
-		#CONVERSION TO MILLISECONDS
-		meter_timestamp=calendar.timegm(datetime.strptime(meter_timestamp, '%Y-%m-%dT%H:%M:%SZ').timetuple())
-          	#LOG.info("CW -> VM MSG TIMESTAMP: %s", meter_timestamp) 
+		try:
+			#meter_timestamp=calendar.timegm(datetime.strptime(meter_timestamp, '%Y-%m-%dT%H:%M:%SZ').timetuple()) # Y2
+			meter_timestamp=calendar.timegm(datetime.strptime(meter_timestamp, '%Y-%m-%dT%H:%M:%S.%f').timetuple()) # Y3
+          		#LOG.info("CW -> VM MSG TIMESTAMP conversion: %s -> %s", meter['timestamp'], meter_timestamp) 
+		except:
+			meter_timestamp=calendar.timegm(datetime.strptime(meter_timestamp, '%Y-%m-%d %H:%M:%S.%f').timetuple()) # Y3
 
-
-		# FOR TUNNELLED CLOUDWAVE METRIC 
+		# FOR TUNNELLED CLOUDWAVE METRICS
                 if meter['resource_metadata'].get('nested_uuid'):
                 	nested_uuid=meter['resource_metadata'].get("nested_uuid")
 			if self.checkCache(nested_uuid):
@@ -265,13 +372,13 @@ class CeiloesperDispatcher(dispatcher.Base):
 				else:
 					LOG.info("CW -> CLOUDWAVE TUNNELLED METRIC generated by %s of the SAME stack: %s. (Sent by %s).", nested_uuid, meter_stackid, meter_inst_name)
 
-
                         meter_inst_uuid = str(nested_uuid)
 
-		# METRIC OF A CLOUDWAVE APPLICATION
+		# FOR CLOUDWAVE APPLICATION METRICS
 		if meter_stackid:
 
 		    if meter['resource_metadata'].get('nested_uuid'):
+			# ALREADY FILTERED in the previous section "FOR TUNNELLED CLOUDWAVE METRIC"
 			#LOG.info('CW -> CLOUDWAVE METRIC %s from VM %s with stack_id: %s', meter_name, meter_inst_uuid, meter_stackid)
 			pass
 		    else:
@@ -291,17 +398,17 @@ class CeiloesperDispatcher(dispatcher.Base):
 
 		else:
 
-		    # METRIC THAT COMES FROM CEILOMETER POLLSTERS
+		    # OPENSTACK METRICS THAT COME FROM CEILOMETER POLLSTERS
 
+		    # TO collect Openstack network metrics
 		    net_inst_id=meter_inst_uuid.split('-', 1 )[0]
 		    if net_inst_id == "instance":
 			net_inst_id=meter_inst_uuid.split('-', 2 )
 			meter_inst_uuid = net_inst_id[2].rsplit('-', 2 )[0]
 			LOG.info('CW -> CEILOMETER NETWORK METRIC: %s - %s', meter_inst_uuid, meter_name)
 			
-			
 
-		    #CHECK IF THE VM IS DEPLOYED WITH HEAT
+		    # CHECK IF THE VM IS DEPLOYED WITH HEAT
 		    if self.checkCache(meter_inst_uuid):
 
 			#LOG.info('CW -> CEILOMETER POLLSTER METRIC (%s) from VM %s deployed with HEAT! %s', meter_name, meter_inst_name, meter_inst_uuid)
@@ -309,16 +416,11 @@ class CeiloesperDispatcher(dispatcher.Base):
 			
 			inst_stackid=self.instances[meter_inst_uuid]            #stackID from HEAT
 			
-			#CEILOMETER METRIC
-
-
+			#FOR DEFUALT CEILOMETER METRICS
 			if meter_hostid == None:
-
                         	meter_hostid = "None"
 
 			esper_data='{"applicationId":"'+inst_stackid+'","probe_inst":"'+meter_inst_uuid+'","name":"'+meter_name+'","volume":"'+meter_volume+'","metadata":"ceilometer","unit":"'+meter_unit+'","timestamp":"'+str(meter_timestamp)+'","source":"VM", "vlan_ip":"None", "host_id":"'+meter_hostid+'"}'
-
-			#LOG.info('CW -> ESPER DATA: %s', esper_data)
 
 			self.sendMeasure(esper_data)
 		    
