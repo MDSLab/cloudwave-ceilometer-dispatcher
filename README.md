@@ -19,7 +19,8 @@ CloudWave Ceiloesper Dispatcher (cw-dispatcher) has been tested to work on:
   * rpm -Uvh cw-dispatcher-2.0-93.x86_64.rpm
   
 ##Configuration guide
-1. Edit the "cloudwave" section in /etc/ceilometer/ceilometer.conf on the Ceilometer Collector machine:
+
+1. Edit the "DEFAULT" and "dispatcher_ceiloesper" sections in /etc/ceilometer/ceilometer.conf on the Ceilometer Collector machine:
 ```
 [DEFAULT]
 # Dispatcher to process data. (multi valued)
